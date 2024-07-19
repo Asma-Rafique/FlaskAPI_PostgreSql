@@ -1,3 +1,4 @@
+import pandas as pd
 from fastapi import Depends, APIRouter
 # from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -22,55 +23,98 @@ def get_db():
 
 @appp.post("/create_template")
 async def create_template(template: Template, db: Session = Depends(get_db)):
+    # Insert template
     template_model = models.template.TemplateModel(
-        name=template.name, rename=template.rename)
+        name=template.name, rename=template.rename
+    )
     db.add(template_model)
     db.commit()
     db.refresh(template_model)
 
+    # Create DataFrames
+    tabs = []
+    sections = []
+    fields = []
+
     for tab in template.tabs:
+        tabs.append({
+            "template_id": template_model.id,
+            "tab_name": tab.tab_name,
+            "tab_rename": tab.tab_rename,
+            "tab_is_active": tab.tab_is_active
+        })
+
+        if tab.tab_sections:
+            for section in tab.tab_sections:
+                sections.append({
+                    "tab_name": tab.tab_name,
+                    "section_name": section.section_name,
+                    "section_rename": section.section_rename,
+                    "section_is_active": section.section_is_active
+                })
+
+                for field in section.section_fields:
+                    fields.append({
+                        "section_name": section.section_name,
+                        "field_name": field.field_name,
+                        "field_rename": field.field_rename,
+                        "field_type": field.field_type,
+                        "field_is_active": field.field_is_active
+                    })
+
+    # Convert to DataFrames
+    df_tabs = pd.DataFrame(tabs)
+    df_sections = pd.DataFrame(sections)
+    df_fields = pd.DataFrame(fields)
+
+    # Insert tabs
+    for index, row in df_tabs.iterrows():
         tab_model = models.template.TabModel(
-            template_id=template_model.id,
-            tab_name=tab.tab_name,
-            tab_rename=tab.tab_rename,
-            tab_is_active=tab.tab_is_active
+            template_id=row['template_id'],
+            tab_name=row['tab_name'],
+            tab_rename=row['tab_rename'],
+            tab_is_active=row['tab_is_active']
         )
         db.add(tab_model)
         db.commit()
         db.refresh(tab_model)
 
-        if tab.tab_sections:
-            for section in tab.tab_sections:
-                section_model = models.template.SectionModel(
-                    tab_id=tab_model.id,
-                    section_name=section.section_name,
-                    section_rename=section.section_rename,
-                    section_is_active=section.section_is_active
-                )
-                db.add(section_model)
-                db.commit()
-                db.refresh(section_model)
+        # Insert sections
+        tab_sections = df_sections[df_sections['tab_name'] == row['tab_name']]
+        for _, section_row in tab_sections.iterrows():
+            section_model = models.template.SectionModel(
+                tab_id=tab_model.id,
+                section_name=section_row['section_name'],
+                section_rename=section_row['section_rename'],
+                section_is_active=section_row['section_is_active']
+            )
+            db.add(section_model)
+            db.commit()
+            db.refresh(section_model)
 
-                for field in section.section_fields:
-                    field_model = models.template.FieldModel(
-                        section_id=section_model.id,
-                        field_name=field.field_name,
-                        field_rename=field.field_rename,
-                        field_type=field.field_type,
-                        field_is_active=field.field_is_active
-                    )
-                    db.add(field_model)
-                    db.commit()
-                    db.refresh(field_model)
+            # Insert fields
+            section_fields = df_fields[df_fields['section_name']
+                                       == section_row['section_name']]
+            for _, field_row in section_fields.iterrows():
+                field_model = models.template.FieldModel(
+                    section_id=section_model.id,
+                    field_name=field_row['field_name'],
+                    field_rename=field_row['field_rename'],
+                    field_type=field_row['field_type'],
+                    field_is_active=field_row['field_is_active']
+                )
+                db.add(field_model)
+                db.commit()
+                db.refresh(field_model)
 
     return {"msg": "Template created successfully", "id": template_model.id}
-
 
 # @appp.get("/templates")
 # async def get_templates(db: Session = Depends(get_db)):
 #     result = db.execute(select(models.template.TemplateModel))
 #     templates = result.scalars().all()
 #     return templates
+
 
 @appp.get("/templates", response_model=List[Template])
 def get_templates(db: Session = Depends(get_db)):
